@@ -3,92 +3,201 @@
 #include <vector>
 #include <memory>
 #include <stdexcept>
+#include <cmath>
 #include "Token.h"
 #include "AST.h"
+
 using namespace std;
-// leafNode: Token se ek leaf (terminal) AST node banata hai
-// Ye numbers, variables, strings jaise terminal values ke liye use hota hai
+
 inline ASTNodePtr leafNode(Token t) {
     return make_shared<ASTNode>(t);
 }
-// listNode: Children ki list se ek internal AST node banata hai
-// Ye operators, blocks, if-statements jaise non-terminal nodes ke liye use hota hai
+
 inline ASTNodePtr listNode(vector<ASTNodePtr> kids) {
     return make_shared<ASTNode>(std::move(kids));
 }
-// Parser class: Tokens ko Abstract Syntax Tree (AST) mein convert karta hai
-// Ye recursive descent parser hai jo grammar rules follow karta hai
+
 class Parser {
+private:
+    vector<Token> tokens_;
+    size_t idx_;
+    Token token_;
+    bool useMathLibrary = false;
+
 public:
-    // Constructor: Tokens ki list leta hai aur parser ko initialize karta hai
     explicit Parser(vector<Token> tokens) : tokens_(std::move(tokens)), idx_(0) {
         token_ = tokens_.empty() ? Token("EOF", "") : tokens_[0];
     }
-    // parse(): Poori program ka AST banata hai
-    // Program mein statements ki list hoti hai
+
     ASTNodePtr parse() {
         cout << string(60, '=') << endl;
         cout << "PARSING PHASE" << endl;
         cout << string(60, '=') << endl;
         
-        vector<ASTNodePtr> program;  // Program ke saare statements store honge
-        int stmtCount = 0;
+        // Check for #use math directive
+        if (token_.type == "USE") {
+            move(); // skip '#use'
+            if (token_.value == "math") {
+                useMathLibrary = true;
+                cout << "  -> Math library loaded!" << endl;
+                move(); // skip 'math'
+            }
+        }
         
-        // Jab tak end of file nahi aa jata, statements parse karte raho
-        while (token_.type != "EOF") {
+        // Check for main function
+        if (token_.type == "MAIN") {
+            cout << "  -> Found main() function" << endl;
+            move(); // skip 'main'
+            
+            if (token_.value != "(") {
+                throw runtime_error("Expected '(' after main");
+            }
+            move(); // skip '('
+            
+            if (token_.value != ")") {
+                throw runtime_error("Expected ')' after main(");
+            }
+            move(); // skip ')'
+            
+            if (token_.value != "{") {
+                throw runtime_error("Expected '{' after main()");
+            }
+            
+            // Parse main block
+            ASTNodePtr mainBlock = block();
+            cout << "Statements parsed: " << mainBlock->children.size() << endl;
+            cout << string(60, '=') << "\n" << endl;
+            return mainBlock;
+        }
+        
+        // No main function - parse all statements as program
+        vector<ASTNodePtr> program;
+        while (token_.type != "EOF" && token_.type != "END") {
             if (idx_ >= tokens_.size()) break;
-            cout << "Parsing statement " << (stmtCount + 1) << endl;
-            program.push_back(statement());  // Har statement ko parse karo
-            stmtCount++;
+            program.push_back(statement());
+            if (token_.type == "END") {
+                move();
+                break;
+            }
         }
         
         cout << "Statements parsed: " << program.size() << endl;
         cout << string(60, '=') << "\n" << endl;
-        
-        ASTNodePtr root = listNode(program);  // Root node banao
-        cout << "DEBUG: Root node has " << root->children.size() << " children" << endl;
-        
-        return root;
+        return listNode(program);
     }
 
 private:
-    vector<Token> tokens_;  // Tokens ki list (input)
-    size_t idx_;            // Current position in tokens
-    Token token_;           // Current token
-
-    // move(): Next token par move karta hai
     void move() {
         idx_++;
         if (idx_ < tokens_.size()) token_ = tokens_[idx_];
     }
 
-    // factor(): Lowest level expressions parse karta hai
-    // Numbers, variables, strings, ya parentheses mein expressions handle karta hai
+    ASTNodePtr parseMathFunction() {
+        if (token_.type == "MATH") {
+            Token mathToken = token_;
+            move(); // skip 'math'
+            
+            if (token_.value != ".") {
+                throw runtime_error("Expected '.' after math");
+            }
+            move(); // skip '.'
+            
+            if (token_.type == "SQRT") {
+                Token func = token_;
+                move();
+                if (token_.value != "(") throw runtime_error("Expected '(' after sqrt");
+                move();
+                ASTNodePtr arg = expression();
+                if (token_.value != ")") throw runtime_error("Expected ')'");
+                move();
+                return listNode({leafNode(mathToken), leafNode(func), arg});
+            }
+            else if (token_.type == "POW") {
+                Token func = token_;
+                move();
+                if (token_.value != "(") throw runtime_error("Expected '(' after pow");
+                move();
+                ASTNodePtr base = expression();
+                if (token_.value != ",") throw runtime_error("Expected ','");
+                move();
+                ASTNodePtr exponent = expression();
+                if (token_.value != ")") throw runtime_error("Expected ')'");
+                move();
+                return listNode({leafNode(mathToken), leafNode(func), base, exponent});
+            }
+            else if (token_.type == "CEIL") {
+                Token func = token_;
+                move();
+                if (token_.value != "(") throw runtime_error("Expected '(' after ceil");
+                move();
+                ASTNodePtr arg = expression();
+                if (token_.value != ")") throw runtime_error("Expected ')'");
+                move();
+                return listNode({leafNode(mathToken), leafNode(func), arg});
+            }
+            else if (token_.type == "FLOOR") {
+                Token func = token_;
+                move();
+                if (token_.value != "(") throw runtime_error("Expected '(' after floor");
+                move();
+                ASTNodePtr arg = expression();
+                if (token_.value != ")") throw runtime_error("Expected ')'");
+                move();
+                return listNode({leafNode(mathToken), leafNode(func), arg});
+            }
+            else if (token_.type == "FABS") {
+                Token func = token_;
+                move();
+                if (token_.value != "(") throw runtime_error("Expected '(' after fabs");
+                move();
+                ASTNodePtr arg = expression();
+                if (token_.value != ")") throw runtime_error("Expected ')'");
+                move();
+                return listNode({leafNode(mathToken), leafNode(func), arg});
+            }
+            else if (token_.type == "FACTORIAL") {
+                Token func = token_;
+                move();
+                if (token_.value != "(") throw runtime_error("Expected '(' after factorial");
+                move();
+                ASTNodePtr arg = expression();
+                if (token_.value != ")") throw runtime_error("Expected ')'");
+                move();
+                return listNode({leafNode(mathToken), leafNode(func), arg});
+            }
+        }
+        return nullptr;
+    }
+
     ASTNodePtr factor() {
-        // Agar INT, FLOAT, ya STRING hai to leaf node banao
+        // Check for math function calls
+        if (useMathLibrary && token_.type == "MATH") {
+            ASTNodePtr mathNode = parseMathFunction();
+            if (mathNode) return mathNode;
+        }
+        
         if (token_.type == "INT" || token_.type == "FLOAT" || token_.type == "STRING") {
             auto node = leafNode(token_);
             move();
             return node;
         }
-        // Agar VARIABLE hai to leaf node banao
+        
         if (token_.type == "VARIABLE") {
             auto node = leafNode(token_);
             move();
             return node;
         }
-        // Agar '(' hai to parentheses mein expression handle karo
+        
         if (token_.value == "(") {
             move();
             auto node = expression();
             if (token_.value == ")") move();
             return node;
         }
+        
         throw runtime_error("Invalid factor: " + token_.value);
     }
 
-    // term(): Multiplication aur division handle karta hai
-    // Left-associative: a * b / c → ((a * b) / c)
     ASTNodePtr term() {
         auto left = factor();
         while (token_.value == "*" || token_.value == "/") {
@@ -100,8 +209,6 @@ private:
         return left;
     }
 
-    // expression(): Addition aur subtraction handle karta hai
-    // Term se banta hai, operator precedence handle karta hai (*/ > +-)
     ASTNodePtr expression() {
         auto left = term();
         while (token_.value == "+" || token_.value == "-") {
@@ -113,7 +220,6 @@ private:
         return left;
     }
 
-    // comparison(): Comparison operators handle karta hai (>, <, ==, etc.)
     ASTNodePtr comparison() {
         auto left = expression();
         while (token_.type == "COMPARISON") {
@@ -125,8 +231,6 @@ private:
         return left;
     }
 
-    // booleanExpr(): Logical operators handle karta hai (AND, OR)
-    // Future expansion ke liye ready
     ASTNodePtr booleanExpr() {
         auto left = comparison();
         while (token_.type == "AND" || token_.type == "OR") {
@@ -135,70 +239,78 @@ private:
             auto right = comparison();
             left = listNode({leafNode(op), left, right});
         }
+        if (token_.type == "NOT") {
+            Token op = token_;
+            move();
+            auto expr = booleanExpr();
+            left = listNode({leafNode(op), expr});
+        }
         return left;
     }
 
-    // block(): Curly braces { ... } ke andar statements ka group parse karta hai
     ASTNodePtr block() {
         vector<ASTNodePtr> statements;
-        if (token_.value == "{") move();  // Opening brace skip karo
+        if (token_.value == "{") move();
         
-        // Jab tak closing brace nahi aa jata, statements parse karte raho
-        while (token_.value != "}" && token_.type != "EOF") {
+        while (token_.value != "}" && token_.type != "EOF" && token_.type != "END") {
             statements.push_back(statement());
         }
-        if (token_.value == "}") move();  // Closing brace skip karo
+        if (token_.value == "}") move();
         
         return listNode(statements);
     }
 
-    // statement(): Har type ka statement parse karta hai
-    // Declaration, assignment, if, while, ya simple expression
     ASTNodePtr statement() {
-        // ===== DECLARATION: notekar var = value =====
+        // DECLARATION
         if (token_.type == "DECLARATION") {
             Token decl = token_;
             move();
-            
-            if (token_.type != "VARIABLE") {
-                throw runtime_error("Expected variable name");
-            }
+            if (token_.type != "VARIABLE") throw runtime_error("Expected variable name");
             Token var = token_;
             move();
-            
-            if (token_.value != "=") {
-                throw runtime_error("Expected '='");
-            }
+            if (token_.value != "=") throw runtime_error("Expected '='");
             move();
-            
             ASTNodePtr right = expression();
-            cout << "  -> Parsed DECLARATION: " << var.value << endl;
             return listNode({leafNode(decl), leafNode(var), right});
         }
         
-        // ===== ASSIGNMENT: var = value (bina notekar ke) =====
-        if (token_.type == "VARIABLE") {
-            size_t nextIdx = idx_ + 1;
-            if (nextIdx < tokens_.size() && tokens_[nextIdx].value == "=") {
-                Token var = token_;
-                move(); // move past variable
-                move(); // move past '='
-                ASTNodePtr right = expression();
-                cout << "  -> Parsed ASSIGNMENT: " << var.value << endl;
-                return listNode({leafNode(var), leafNode(Token("OPERATOR", "=")), right});
-            }
+        // ASSIGNMENT
+        if (token_.type == "ASSIGN") {
+            move();
+            if (token_.type != "VARIABLE") throw runtime_error("Expected variable name");
+            Token var = token_;
+            move();
+            if (token_.value != "=") throw runtime_error("Expected '='");
+            move();
+            ASTNodePtr right = expression();
+            return listNode({leafNode(var), leafNode(Token("OPERATOR", "=")), right});
         }
         
-        // ===== IF STATEMENT =====
+        // INPUT
+        if (token_.type == "INPUT") {
+            Token inputKw = token_;
+            move();
+            if (token_.type != "VARIABLE") throw runtime_error("Expected variable name");
+            Token var = token_;
+            move();
+            return listNode({leafNode(inputKw), leafNode(var)});
+        }
+        
+        // OUTPUT
+        if (token_.type == "OUTPUT") {
+            Token outputKw = token_;
+            move();
+            ASTNodePtr expr = expression();
+            return listNode({leafNode(outputKw), expr});
+        }
+        
+        // IF
         if (token_.type == "IF") {
             Token kw = token_;
             move();
-            ASTNodePtr condition = booleanExpr();  // Condition parse karo
-            ASTNodePtr body = block();             // Body parse karo
-            
+            ASTNodePtr condition = booleanExpr();
+            ASTNodePtr body = block();
             vector<ASTNodePtr> ifNode = {leafNode(kw), condition, body};
-            
-            // Optional ELIF / ELSEIF blocks parse karo
             while (token_.type == "ELIF" || token_.type == "ELSEIF") {
                 Token elifKw = token_;
                 move();
@@ -206,35 +318,32 @@ private:
                 ASTNodePtr elifBody = block();
                 ifNode.push_back(listNode({leafNode(elifKw), elifCond, elifBody}));
             }
-            
-            // Optional ELSE block parse karo
             if (token_.type == "ELSE") {
-                Token elseKw = token_;
                 move();
                 ASTNodePtr elseBody = block();
-                ifNode.push_back(listNode({leafNode(elseKw), elseBody}));
+                ifNode.push_back(listNode({leafNode(Token("ELSE", "otherwise")), elseBody}));
             }
-            
-            cout << "  -> Parsed IF statement" << endl;
             return listNode(ifNode);
         }
 
-        // ===== WHILE STATEMENT =====
+        // WHILE
         if (token_.type == "WHILE") {
             Token kw = token_;
             move();
-            ASTNodePtr condition = booleanExpr();  // Condition parse karo
-            ASTNodePtr body = block();             // Body parse karo
-            cout << "  -> Parsed WHILE loop" << endl;
+            ASTNodePtr condition = booleanExpr();
+            ASTNodePtr body = block();
             return listNode({leafNode(kw), condition, body});
         }
-        // ===== EXPRESSION (variable reference ya calculation) =====
-        ASTNodePtr expr = expression();
-        if (expr->token.type == "VARIABLE") {
-            cout << "  -> Parsed VARIABLE reference: " << expr->token.value << endl;
-        } else {
-            cout << "  -> Parsed EXPRESSION" << endl;
+
+        // END
+        if (token_.type == "END") {
+            Token endKw = token_;
+            move();
+            return leafNode(endKw);
         }
+
+        // Expression
+        ASTNodePtr expr = expression();
         return expr;
     }
 };

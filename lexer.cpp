@@ -3,79 +3,116 @@
 #include <string>
 #include <cctype>
 #include "Token.h"
+
 using namespace std;
-// Lexer class: Source code ko tokens mein todta hai (lexical analysis)
-// Ye program ke raw text ko chhotay chhotay meaningful units (tokens) mein convert karta hai
+
 class Lexer {
 private:
-    string text;          // Input source code
-    size_t idx;           // Current position in text
-    char currentChar;     // Current character being processed
-    int line;             // Current line number (error tracking ke liye)
-    int column;           // Current column number (error tracking ke liye)
-    vector<Token> tokens; // Extracted tokens ka list
+    string text;
+    size_t idx;
+    char currentChar;
+    int line;
+    int column;
+    vector<Token> tokens;
+
 public:
-    // Constructor: Input string leta hai aur lexer ko initialize karta hai
     Lexer(string input) : text(input), idx(0), line(1), column(1) {
         currentChar = text.empty() ? '\0' : text[0];
     }
-    // tokenize(): Main function jo source code ko tokens mein break karta hai
-    // Whitespace, comments skip karta hai aur numbers, strings, identifiers, operators ko recognize karta hai
+
     vector<Token> tokenize() {
         cout << "\n" << string(60, '=') << endl;
         cout << "LEXICAL ANALYSIS PHASE" << endl;
         cout << string(60, '=') << endl;
-        // Jab tak end of file nahi aa jata, characters process karte raho
+        
         while (idx < text.size()) {
-            // Whitespace ko skip karo (space, tab, newline)
+            // Skip whitespace
             if (isspace(currentChar)) {
                 if (currentChar == '\n') {
-                    line++;      // Nai line start ho gayi
+                    line++;
                     column = 1;
                 } else {
                     column++;
                 }
                 move();
                 continue;
-            } 
-            // Skip single-line comments (// se start hotay hain)
-            if (currentChar == '/' && idx + 1 < text.size() && text[idx + 1] == '/') {
+            }
+            
+            // Skip comments
+            if ((currentChar == '/' && idx + 1 < text.size() && text[idx + 1] == '/') ||
+                (currentChar == '#')) {
                 while (idx < text.size() && currentChar != '\n') {
-                    move();      // Line ke end tak skip karo
+                    move();
                 }
                 continue;
-            } 
-            // Number extract karo (integer ya float)
+            }
+            
+            // Check for #use directive
+            if (currentChar == '#' && idx + 3 < text.size() && 
+                text[idx + 1] == 'u' && text[idx + 2] == 's' && text[idx + 3] == 'e') {
+                tokens.push_back(Token("USE", "#use", line, column));
+                cout << "  📦 Token: USE         | Value: '#use'" << endl;
+                for (int i = 0; i < 4; i++) {
+                    move();
+                    column++;
+                }
+                continue;
+            }
+            
+            // Check for i/p and o/p keywords
+            if (currentChar == 'i' && idx + 2 < text.size() && 
+                text[idx + 1] == '/' && text[idx + 2] == 'p') {
+                tokens.push_back(Token("INPUT", "i/p", line, column));
+                cout << "  📥 Token: INPUT       | Value: 'i/p'" << endl;
+                move(); move(); move();
+                column += 3;
+                continue;
+            }
+            
+            if (currentChar == 'o' && idx + 2 < text.size() && 
+                text[idx + 1] == '/' && text[idx + 2] == 'p') {
+                tokens.push_back(Token("OUTPUT", "o/p", line, column));
+                cout << "  📤 Token: OUTPUT      | Value: 'o/p'" << endl;
+                move(); move(); move();
+                column += 3;
+                continue;
+            }
+            
+            // Numbers
             if (isdigit(currentChar)) {
                 tokens.push_back(extractNumber());
                 continue;
             }
-            // String literal extract karo (double quotes ke andar)
+
+            // Strings
             if (currentChar == '"') {
                 tokens.push_back(extractString());
                 continue;
             }
-            // Identifier ya keyword extract karo (variable names, if, else, etc.)
+
+            // Identifiers and Keywords
             if (isalpha(currentChar)) {
                 tokens.push_back(extractIdentifier());
                 continue;
             }
-            // Operators handle karo (+, -, *, /, =, (, ), {, })
-            if (string("+-*/=(){}").find(currentChar) != string::npos) {
+
+            // Operators
+            if (string("+-*/=(){}.").find(currentChar) != string::npos) {
                 tokens.push_back(Token("OPERATOR", string(1, currentChar), line, column));
-                cout << "  Token: OPERATOR    | Value: '" << currentChar << "'" << endl;
+                cout << "  🔧 Token: OPERATOR    | Value: '" << currentChar << "'" << endl;
                 move();
                 continue;
             }
-            // Comparison operators handle karo (>, <, ==, !=, etc.)
-            if (string("><=?").find(currentChar) != string::npos) {
+
+            // Comparison operators
+            if (string("><=!").find(currentChar) != string::npos) {
                 tokens.push_back(extractComparison());
                 continue;
             }
-            // Agar koi unknown character ho to skip karo (error handling)
+
             move();
         }
-        // End of file token add karo
+
         tokens.push_back(Token("EOF", "", line, column));
         
         cout << "\nTotal Tokens: " << tokens.size() << endl;
@@ -83,9 +120,8 @@ public:
         
         return tokens;
     }
+
 private:
-    // move(): Next character par move karta hai
-    // Index increment karta hai aur currentChar update karta hai
     void move() {
         idx++;
         if (idx < text.size())
@@ -93,78 +129,109 @@ private:
         else
             currentChar = '\0';
     }
-    // extractNumber(): Number token extract karta hai
-    // Integers aur floating point numbers dono ko handle karta hai
+
     Token extractNumber() {
         string num = "";
         bool isFloat = false;
-        int startCol = column; 
-        // Digits aur decimal point collect karo
+        int startLine = line;
+        int startCol = column;
+        
         while (idx < text.size() && (isdigit(currentChar) || currentChar == '.')) {
-            if (currentChar == '.') isFloat = true;
+            if (currentChar == '.') {
+                if (isFloat) {
+                    cout << "  WARNING: Multiple decimal points in number" << endl;
+                    break;
+                }
+                isFloat = true;
+            }
             num += currentChar;
             column++;
             move();
         }
-        Token t = isFloat ? Token("FLOAT", num, line, startCol) : Token("INT", num, line, startCol);
-        cout << "  Token: " << (isFloat ? "FLOAT" : "INT") << "        | Value: '" << num << "'" << endl;
+        
+        Token t = isFloat ? Token("FLOAT", num, startLine, startCol) 
+                          : Token("INT", num, startLine, startCol);
+        cout << "  🔢 Token: " << (isFloat ? "FLOAT" : "INT") << "         | Value: '" << num << "'" << endl;
         return t;
     }
-    // extractString(): String literal extract karta hai
-    // Double quotes ke andar ka content return karta hai
+
     Token extractString() {
+        int startLine = line;
         int startCol = column;
-        move();                // Opening quote skip karo
+        move(); // Skip opening quote
         string str = "";
-        // Jab tak closing quote ya newline nahi aa jata, characters collect karo
+        
         while (idx < text.size() && currentChar != '"' && currentChar != '\n') {
             str += currentChar;
             column++;
             move();
         }
-        // Closing quote skip karo
+        
         if (currentChar == '"') {
             move();
             column++;
+        } else {
+            cout << "  WARNING: Unterminated string" << endl;
         }
-        Token t = Token("STRING", str, line, startCol);
-        cout << "  Token: STRING      | Value: '" << str << "'" << endl;
+        
+        Token t = Token("STRING", str, startLine, startCol);
+        cout << "  📝 Token: STRING      | Value: '" << str << "'" << endl;
         return t;
     }
-    // extractIdentifier(): Identifier ya keyword extract karta hai
-    // Variable names, if, else, for, while, etc. ko recognize karta hai
+
     Token extractIdentifier() {
         string word = "";
+        int startLine = line;
         int startCol = column;
-        // Letters, digits, underscore collect karo
+        
         while (idx < text.size() && (isalnum(currentChar) || currentChar == '_')) {
             word += currentChar;
             column++;
             move();
         }
-        // Check karo ke keyword hai ya variable
+        
         string tokenType = "VARIABLE";
+        
+        // Check if it's a keyword
         auto it = KEYWORDS.find(word);
         if (it != KEYWORDS.end()) {
-            tokenType = it->second;   // Keyword hai (IF, ELSE, etc.)
+            tokenType = it->second;
         }
-        Token t = Token(tokenType, word, line, startCol);
-        cout << "  Token: " << tokenType << "     | Value: '" << word << "'" << endl;
+        
+        Token t = Token(tokenType, word, startLine, startCol);
+        
+        string icon = "📝";
+        if (tokenType == "DECLARATION") icon = "📦";
+        else if (tokenType == "ASSIGN") icon = "✏️";
+        else if (tokenType == "IF") icon = "❓";
+        else if (tokenType == "WHILE") icon = "🔄";
+        else if (tokenType == "MAIN") icon = "🏠";
+        else if (tokenType == "MATH") icon = "📐";
+        else if (tokenType == "USE") icon = "📚";
+        else if (tokenType == "SQRT") icon = "√";
+        else if (tokenType == "POW") icon = "🔢";
+        else if (tokenType == "CEIL") icon = "⬆️";
+        else if (tokenType == "FLOOR") icon = "⬇️";
+        else if (tokenType == "FABS") icon = "⎪";
+        else if (tokenType == "FACTORIAL") icon = "!";
+        
+        cout << "  " << icon << " Token: " << tokenType << "   | Value: '" << word << "'" << endl;
         return t;
     }
-    // extractComparison(): Comparison operator extract karta hai
-    // >, <, ==, !=, etc. ko handle karta hai
+
     Token extractComparison() {
         string comp = "";
+        int startLine = line;
         int startCol = column;
-        // Comparison characters collect karo
-        while (idx < text.size() && string("><=?").find(currentChar) != string::npos) {
+        
+        while (idx < text.size() && string("><=!").find(currentChar) != string::npos) {
             comp += currentChar;
             column++;
             move();
         }
-        Token t = Token("COMPARISON", comp, line, startCol);
-        cout << "  Token: COMPARISON  | Value: '" << comp << "'" << endl;
+        
+        Token t = Token("COMPARISON", comp, startLine, startCol);
+        cout << "  ⚖️  Token: COMPARISON | Value: '" << comp << "'" << endl;
         return t;
     }
 };

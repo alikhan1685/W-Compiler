@@ -7,32 +7,27 @@
 #include "Token.h"
 #include "AST.h"
 #include "SymbolTable.h"
+
 using namespace std;
-// Interpreter class: AST ko execute karta hai
-// Ye program ke har statement ko evaluate karta hai aur variables ki values ko manage karta hai
+
 class Interpreter {
 public:
-    // Constructor: AST aur symbol table ka reference leta hai
     Interpreter(ASTNodePtr tree, SymbolTable& symbols) : tree_(tree), symbols_(symbols) {}
-    // interpret(): program execution start karta hai
-    // Sab statements ko sequentially execute karta hai aur akhir mein variables ki values print karta hai
+
     void interpret() {
         cout << string(60, '=') << endl;
         cout << "EXECUTION PHASE" << endl;
         cout << string(60, '=') << endl;
+        
         try {
-            cout << "DEBUG: Tree has " << tree_->children.size() << " children" << endl;
-            
-            // Har child statement ko execute karo
             for (size_t i = 0; i < tree_->children.size(); i++) {
-                cout << "\n--- Executing statement " << (i+1) << " ---" << endl;
+                cout << "\n--- Processing statement " << (i+1) << " ---" << endl;
                 ASTNodePtr result = eval(tree_->children[i]);
-                // Agar result INT ya STRING hai to print mat karo (variable reference already handle karega)
-                if (result && (result->token.type == "INT" || result->token.type == "STRING")) {
-                    // Kuch nahi karna
+                if (result && result->token.type == "END") {
+                    break;
                 }
-            }  
-            // Program ke end par sab variables ki values print karo
+            }
+            
             cout << "\n" << string(60, '=') << endl;
             cout << "PROGRAM OUTPUT" << endl;
             cout << string(60, '=') << endl;
@@ -43,200 +38,265 @@ public:
         }
         cout << string(60, '=') << "\n" << endl;
     }
+
 private:
-    ASTNodePtr tree_;           // AST jo execute karna hai
-    SymbolTable& symbols_;      // Variable values store karne ke liye symbol table
-    // toNumber(): AST node ki value ko number (double) mein convert karta hai
-    // Variable, INT, ya FLOAT ho sakta hai
+    ASTNodePtr tree_;
+    SymbolTable& symbols_;
+
+    // Math functions
+    double factorial(double n) {
+        if (n < 0) throw runtime_error("Factorial of negative number is not defined");
+        if (n == 0 || n == 1) return 1;
+        if (n != floor(n)) throw runtime_error("Factorial is only defined for integers");
+        double result = 1;
+        for (int i = 2; i <= (int)n; i++) result *= i;
+        return result;
+    }
+    
+    ASTNodePtr evalMathFunction(ASTNodePtr node) {
+        if (!node->isList || node->children.size() < 2) return nullptr;
+        auto& children = node->children;
+        
+        if (children[1]->token.type == "SQRT") {
+            double arg = toNumber(eval(children[2]));
+            if (arg < 0) throw runtime_error("sqrt() of negative number");
+            double result = sqrt(arg);
+            return make_shared<ASTNode>(Token(result == floor(result) ? "INT" : "FLOAT", to_string(result)));
+        }
+        if (children[1]->token.type == "POW") {
+            double base = toNumber(eval(children[2]));
+            double exp = toNumber(eval(children[3]));
+            double result = pow(base, exp);
+            return make_shared<ASTNode>(Token(result == floor(result) ? "INT" : "FLOAT", to_string(result)));
+        }
+        if (children[1]->token.type == "CEIL") {
+            double arg = toNumber(eval(children[2]));
+            double result = ceil(arg);
+            return make_shared<ASTNode>(Token("INT", to_string((int)result)));
+        }
+        if (children[1]->token.type == "FLOOR") {
+            double arg = toNumber(eval(children[2]));
+            double result = floor(arg);
+            return make_shared<ASTNode>(Token("INT", to_string((int)result)));
+        }
+        if (children[1]->token.type == "FABS") {
+            double arg = toNumber(eval(children[2]));
+            double result = fabs(arg);
+            return make_shared<ASTNode>(Token(result == floor(result) ? "INT" : "FLOAT", to_string(result)));
+        }
+        if (children[1]->token.type == "FACTORIAL") {
+            double arg = toNumber(eval(children[2]));
+            double result = factorial(arg);
+            return make_shared<ASTNode>(Token("INT", to_string((int)result)));
+        }
+        return nullptr;
+    }
+
+    string getStringValue(ASTNodePtr node) {
+        if (!node) return "";
+        if (node->token.type == "VARIABLE") return symbols_.read(node->token.value).value;
+        return node->token.value;
+    }
+
+    bool isNumeric(const string& str) {
+        if (str.empty()) return false;
+        bool hasDecimal = false;
+        for (size_t i = 0; i < str.length(); i++) {
+            if (i == 0 && str[i] == '-') continue;
+            if (str[i] == '.') {
+                if (hasDecimal) return false;
+                hasDecimal = true;
+                continue;
+            }
+            if (!isdigit(str[i])) return false;
+        }
+        return true;
+    }
+
     double toNumber(ASTNodePtr node) {
         if (!node) return 0;
-        
-        if (node->token.type == "VARIABLE") {
-            Token val = symbols_.read(node->token.value);
-            return stod(val.value);
-        }
-        if (node->token.type == "INT") {
-            return stod(node->token.value);
-        }
-        if (node->token.type == "FLOAT") {
-            return stod(node->token.value);
-        }
-        return 0;
+        if (node->token.type == "VARIABLE") return stod(symbols_.read(node->token.value).value);
+        return stod(node->token.value);
     }
-    // toBool(): AST node ki value ko boolean mein convert karta hai
-    // BOOL literal, variable, ya numeric value (nonzero = true) ho sakta hai
+    
     bool toBool(ASTNodePtr node) {
         if (!node) return false;
-        
-        if (node->token.type == "BOOL") {
-            return node->token.value == "true";
-        }
         if (node->token.type == "VARIABLE") {
-            Token val = symbols_.read(node->token.value);
-            if (val.type == "BOOL") return val.value == "true";
-            return stod(val.value) != 0;
+            string val = symbols_.read(node->token.value).value;
+            if (isNumeric(val)) return stod(val) != 0;
+            return !val.empty();
         }
-        if (node->token.type == "INT") {
-            return stod(node->token.value) != 0;
-        }
-        if (node->token.type == "FLOAT") {
-            return stod(node->token.value) != 0;
-        }
+        if (node->token.type == "INT") return stod(node->token.value) != 0;
+        if (node->token.type == "STRING") return !node->token.value.empty();
         return false;
     }
-    // eval(): AST node ko evaluate (execute) karta hai
-    // Ye interpreter ka core function hai - har tarah ke statement ko handle karta hai
+
     ASTNodePtr eval(ASTNodePtr node) {
-        if (!node) {
-            cout << "  [EVAL] Node is null" << endl;
-            return nullptr;
+        if (!node) return nullptr;
+        
+        // Math function call
+        if (node->isList && node->children.size() >= 2 && node->children[0]->token.type == "MATH") {
+            return evalMathFunction(node);
         }
-        // Debug print: node ki information show karo
-        if (node->isList) {
-            cout << "  [EVAL] List node, " << node->children.size() << " children" << endl;
-            if (node->children.size() > 0 && !node->children[0]->isList) {
-                cout << "  [EVAL] First child token: " << node->children[0]->token.type << endl;
+        
+        // Declaration (let)
+        if (node->isList && node->children.size() == 3 && node->children[0]->token.type == "DECLARATION") {
+            string varName = node->children[1]->token.value;
+            ASTNodePtr value = eval(node->children[2]);
+            if (symbols_.exists(varName)) {
+                symbols_.write(varName, value->token);
+            } else {
+                symbols_.declare(varName, value->token, 0);
             }
-        } else {
-            cout << "  [EVAL] Leaf node: " << node->token.type << " = " << node->token.value << endl;
+            return value;
         }
-        // ===== DECLARATION (notekar var = value) =====
-        // Pattern: [DECLARATION, variableName, value]
-        if (node->isList && node->children.size() == 3) {
-            auto& c = node->children;  
-            if (c[0]->token.type == "DECLARATION") {
-                string varName = c[1]->token.value;
-                cout << "  [DECLARE] Processing declaration for: " << varName << endl;
-                ASTNodePtr value = eval(c[2]);
-                string valStr = value->token.value;
-                cout << "  [DECLARE] Value = " << valStr << endl;      
-                if (symbols_.exists(varName)) {
-                    symbols_.write(varName, Token(value->token.type, valStr));
-                    cout << "  [UPDATE] " << varName << " = " << valStr << endl;
-                } else {
-                    symbols_.declare(varName, Token(value->token.type, valStr), 0);
-                    cout << "  [DECLARE] " << varName << " = " << valStr << endl;
-                }
-                return value;
+        
+        // Assignment (set)
+        if (node->isList && node->children.size() == 3 && node->children[0]->token.type == "VARIABLE") {
+            string varName = node->children[0]->token.value;
+            ASTNodePtr value = eval(node->children[2]);
+            if (symbols_.exists(varName)) {
+                symbols_.write(varName, value->token);
+            } else {
+                symbols_.declare(varName, value->token, 0);
             }
+            return value;
         }
-        // ===== ASSIGNMENT (var = value) =====
-        // Pattern: [VARIABLE, OPERATOR(=), value]
-        if (node->isList && node->children.size() == 3) {
-            auto& c = node->children;    
-            if (c[0]->token.type == "VARIABLE" && c[1]->token.type == "OPERATOR" && c[1]->token.value == "=") {
-                string varName = c[0]->token.value;
-                cout << "  [ASSIGN] Processing assignment for: " << varName << endl;
-                ASTNodePtr value = eval(c[2]);
-                string valStr = value->token.value;
-                cout << "  [ASSIGN] Value = " << valStr << endl;
-                
-                if (symbols_.exists(varName)) {
-                    symbols_.write(varName, Token(value->token.type, valStr));
-                    cout << "  [ASSIGN] " << varName << " = " << valStr << endl;
-                } else {
-                    symbols_.declare(varName, Token(value->token.type, valStr), 0);
-                    cout << "  [DECLARE] " << varName << " = " << valStr << endl;
-                }
-                return value;
-            }
-        }
-        // ===== BINARY OPERATIONS (+, -, *, /) =====
-        // Pattern: [OPERATOR, leftOperand, rightOperand]
+        
+        // Binary operations (+, -, *, /)
         if (node->isList && node->children.size() == 3) {
             auto op = node->children[0];
             auto left = node->children[1];
             auto right = node->children[2];
+            
             if (op->token.type == "OPERATOR") {
-                double a = toNumber(left);
-                double b = toNumber(right);
-                double result = 0;   
-                if (op->token.value == "+") result = a + b;
-                else if (op->token.value == "-") result = a - b;
-                else if (op->token.value == "*") result = a * b;
-                else if (op->token.value == "/") result = a / b;
-                
-                cout << "  [CALC] " << a << " " << op->token.value << " " << b << " = " << result << endl;
-                
-                // Agar result integer hai to INT return karo, nahi to FLOAT
-                if (result == floor(result))
-                    return make_shared<ASTNode>(Token("INT", to_string((int)result)));
-                else
-                    return make_shared<ASTNode>(Token("FLOAT", to_string(result)));
+                if (op->token.value == "+") {
+                    string l = getStringValue(left);
+                    string r = getStringValue(right);
+                    if (isNumeric(l) && isNumeric(r)) {
+                        double result = stod(l) + stod(r);
+                        return make_shared<ASTNode>(Token(result == floor(result) ? "INT" : "FLOAT", to_string(result)));
+                    } else {
+                        return make_shared<ASTNode>(Token("STRING", l + r));
+                    }
+                }
+                else if (op->token.value == "-") {
+                    double result = toNumber(left) - toNumber(right);
+                    return make_shared<ASTNode>(Token(result == floor(result) ? "INT" : "FLOAT", to_string(result)));
+                }
+                else if (op->token.value == "*") {
+                    double result = toNumber(left) * toNumber(right);
+                    return make_shared<ASTNode>(Token(result == floor(result) ? "INT" : "FLOAT", to_string(result)));
+                }
+                else if (op->token.value == "/") {
+                    double result = toNumber(left) / toNumber(right);
+                    return make_shared<ASTNode>(Token(result == floor(result) ? "INT" : "FLOAT", to_string(result)));
+                }
             }
-            // ===== COMPARISON OPERATIONS (>, <, ==) =====
+            
+            // Comparison operators
             if (op->token.type == "COMPARISON") {
                 double a = toNumber(left);
                 double b = toNumber(right);
-                bool result = false;   
+                bool result = false;
                 if (op->token.value == ">") result = a > b;
                 else if (op->token.value == "<") result = a < b;
                 else if (op->token.value == "==") result = a == b;
-                
-                cout << "  [COMPARE] " << a << " " << op->token.value << " " << b << " = " << (result ? "true" : "false") << endl;
+                else if (op->token.value == "!=") result = a != b;
                 return make_shared<ASTNode>(Token("BOOL", result ? "true" : "false"));
             }
         }
-        // ===== IF-ELIF-ELSE =====
-        // Pattern: [IF, condition, block, optional ELIF/ELSE blocks]
-        if (node->isList && node->children.size() >= 2) {
-            auto& c = node->children;
-            if (c[0]->token.type == "IF") {
-                cout << "  [IF] Processing IF statement" << endl;
-                bool condition = toBool(eval(c[1]));
-                if (condition) {
-                    cout << "  [IF] Condition TRUE, executing block" << endl;
-                    return eval(c[2]);
+        
+        // INPUT statement (i/p)
+        if (node->isList && node->children.size() == 2 && node->children[0]->token.type == "INPUT") {
+            string varName = node->children[1]->token.value;
+            string inputValue;
+            cout << "  [INPUT] Enter value for " << varName << ": ";
+            getline(cin, inputValue);
+            
+            Token valueToken;
+            if (isNumeric(inputValue)) {
+                if (inputValue.find('.') != string::npos) {
+                    valueToken = Token("FLOAT", inputValue);
+                } else {
+                    valueToken = Token("INT", inputValue);
                 }
-                cout << "  [IF] Condition FALSE" << endl;
-                // Check for ELIF and ELSE blocks
-                for (size_t i = 3; i < c.size(); i++) {
-                    auto& child = c[i];
-                    if (child->isList && child->children.size() >= 2) {
-                        auto& sub = child->children;
-                        
-                        if (sub[0]->token.type == "ELIF" || sub[0]->token.type == "ELSEIF") {
-                            bool elifCond = toBool(eval(sub[1]));
-                            if (elifCond) {
-                                cout << "  [ELIF] Condition TRUE, executing block" << endl;
-                                return eval(sub[2]);
-                            }
-                            cout << "  [ELIF] Condition FALSE" << endl;
-                        }
-                        else if (sub[0]->token.type == "ELSE") {
-                            cout << "  [ELSE] Executing block" << endl;
-                            return eval(sub[1]);
-                        }
+            } else {
+                valueToken = Token("STRING", inputValue);
+            }
+            
+            if (symbols_.exists(varName)) {
+                symbols_.write(varName, valueToken);
+            } else {
+                symbols_.declare(varName, valueToken, 0);
+            }
+            return make_shared<ASTNode>(valueToken);
+        }
+        
+        // OUTPUT statement (o/p)
+        if (node->isList && node->children.size() == 2 && node->children[0]->token.type == "OUTPUT") {
+            ASTNodePtr value = eval(node->children[1]);
+            cout << value->token.value << endl;
+            return value;
+        }
+        
+        // IF statement
+        if (node->isList && node->children.size() >= 2 && node->children[0]->token.type == "IF") {
+            bool condition = toBool(eval(node->children[1]));
+            if (condition) {
+                return eval(node->children[2]);
+            }
+            for (size_t i = 3; i < node->children.size(); i++) {
+                auto& child = node->children[i];
+                if (child->isList && child->children.size() >= 2) {
+                    if (child->children[0]->token.type == "ELIF" && toBool(eval(child->children[1]))) {
+                        return eval(child->children[2]);
+                    }
+                    if (child->children[0]->token.type == "ELSE") {
+                        return eval(child->children[1]);
                     }
                 }
-                return nullptr;
             }
+            return nullptr;
         }
-        // ===== VARIABLE REFERENCE (Print) =====
-        // Jab variable ka value read karna ho (jaise print statement mein)
+        
+        // WHILE loop
+        if (node->isList && node->children.size() >= 2 && node->children[0]->token.type == "WHILE") {
+            int iterations = 0;
+            while (toBool(eval(node->children[1]))) {
+                if (node->children.size() > 2) eval(node->children[2]);
+                iterations++;
+                if (iterations > 1000) break;
+            }
+            return nullptr;
+        }
+        
+        // END statement
+        if (node->token.type == "END") {
+            return node;
+        }
+        
+        // Variable reference (print value)
         if (node->token.type == "VARIABLE") {
             Token val = symbols_.read(node->token.value);
-            cout << "  [PRINT] " << node->token.value << " = " << val.value << endl;
             cout << val.value << endl;
             return make_shared<ASTNode>(val);
         }
-        // ===== STRING LITERAL =====
-        // Direct string print karna
+        
+        // String literal
         if (node->token.type == "STRING") {
-            cout << "  [PRINT] String: " << node->token.value << endl;
-            cout << node->token.value << endl;
             return node;
         }
-        // ===== BLOCK =====
-        // Statements ka group - sequentially execute karo
+        
+        // Block (list of statements)
         if (node->isList && !node->children.empty()) {
-            cout << "  [BLOCK] Executing block with " << node->children.size() << " statements" << endl;
             ASTNodePtr result = nullptr;
             for (auto& stmt : node->children) {
                 result = eval(stmt);
             }
             return result;
         }
+        
         return node;
     }
 };
